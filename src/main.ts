@@ -9,6 +9,13 @@ async function bootstrap() {
     instrument: ObserveInstrument,
   });
 
+   // Allow requests from the Next.js dashboard.
+  app.enableCors({
+    origin: ['http://localhost:3001'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
+  
   app.setGlobalPrefix('api/v1', {
     exclude: ['/'],
   });
