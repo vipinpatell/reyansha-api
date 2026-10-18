@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsDateString,
   IsDefined,
@@ -37,6 +37,9 @@ export class UserMobileDto {
   primary!: string;
 
   @ApiPropertyOptional({ example: '+919000000020' })
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
   @IsOptional()
   @IsString()
   @Matches(/^\+[1-9]\d{7,14}$/)
@@ -88,11 +91,11 @@ export class CreateUserDto {
   @Type(() => UserNameDto)
   name!: UserNameDto;
 
-  @ApiProperty({ example: 'defaultuser19', minLength: 3, maxLength: 30 })
+  @ApiProperty({ example: 'amitpateldev@gmail.com', minLength: 3, maxLength: 30 })
   @IsString()
   @MinLength(3)
   @MaxLength(30)
-  @Matches(/^[a-zA-Z0-9._-]+$/)
+  @Matches(/^[a-zA-Z0-9._-]+(?:@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})?$/)
   username!: string;
 
   @ApiProperty({ example: '1990-01-01T00:00:00.000Z', format: 'date-time' })
