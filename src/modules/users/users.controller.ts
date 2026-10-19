@@ -46,7 +46,9 @@ export class UsersController {
   @ApiOperation({ summary: 'Create a user' })
   @ApiCreatedResponse({ description: 'User created successfully' })
   @ApiBadRequestResponse({ description: 'The request body is invalid' })
-  @ApiConflictResponse({ description: 'Username, email, or primary mobile is already in use' })
+  @ApiConflictResponse({
+    description: 'Username, email, primary mobile, or employee ID is already in use',
+  })
   create(@Body() user: CreateUserDto) {
     return this.usersService.create(user);
   }
@@ -67,7 +69,9 @@ export class UsersController {
   @ApiOkResponse({ description: 'User replaced successfully' })
   @ApiBadRequestResponse({ description: 'The ID or request body is invalid' })
   @ApiNotFoundResponse({ description: 'User not found' })
-  @ApiConflictResponse({ description: 'Username, email, or primary mobile is already in use' })
+  @ApiConflictResponse({
+    description: 'Username, email, primary mobile, or employee ID is already in use',
+  })
   replace(@Param('id') id: string, @Body() user: CreateUserDto) {
     return this.usersService.replace(id, user);
   }
@@ -78,7 +82,9 @@ export class UsersController {
   @ApiOkResponse({ description: 'User updated successfully' })
   @ApiBadRequestResponse({ description: 'The ID, request body, or update is invalid' })
   @ApiNotFoundResponse({ description: 'User not found' })
-  @ApiConflictResponse({ description: 'Username, email, or primary mobile is already in use' })
+  @ApiConflictResponse({
+    description: 'Username, email, primary mobile, or employee ID is already in use',
+  })
   update(@Param('id') id: string, @Body() user: UpdateUserDto) {
     return this.usersService.update(id, user);
   }

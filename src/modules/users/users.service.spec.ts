@@ -1,7 +1,6 @@
 import { getModelToken } from '@nestjs/mongoose';
 import {
   BadRequestException,
-  ConflictException,
   NotFoundException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -31,6 +30,7 @@ describe('UsersService', () => {
     create: ReturnType<typeof vi.fn>;
     find: ReturnType<typeof vi.fn>;
     findById: ReturnType<typeof vi.fn>;
+    exists: ReturnType<typeof vi.fn>;
     findOneAndReplace: ReturnType<typeof vi.fn>;
     findByIdAndUpdate: ReturnType<typeof vi.fn>;
   };
@@ -40,6 +40,7 @@ describe('UsersService', () => {
       create: vi.fn(),
       find: vi.fn(),
       findById: vi.fn(),
+      exists: vi.fn(),
       findOneAndReplace: vi.fn(),
       findByIdAndUpdate: vi.fn(),
     };
@@ -80,6 +81,29 @@ describe('UsersService', () => {
     await expect(service.findOne(user._id)).resolves.toBe(user);
   });
 
+  it('validates reporting manager references and prevents self-reporting', async () => {
+    const managerId = '507f1f77bcf86cd799439012';
+    userModel.exists.mockReturnValue({
+      exec: vi.fn().mockResolvedValue({ _id: managerId }),
+    });
+    userModel.create.mockResolvedValue({ _id: 'user-id' });
+
+    await expect(
+      service.create({ ...validUser, reportingManager: managerId }),
+    ).resolves.toEqual({ _id: 'user-id' });
+
+    await expect(
+      service.update(managerId, { reportingManager: managerId }),
+    ).rejects.toThrow('A user cannot be their own reporting manager');
+
+    userModel.exists.mockReturnValue({
+      exec: vi.fn().mockResolvedValue(null),
+    });
+    await expect(
+      service.create({ ...validUser, reportingManager: managerId }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   it('rejects invalid IDs and reports missing users', async () => {
     await expect(service.findOne('invalid-id')).rejects.toBeInstanceOf(
       BadRequestException,
@@ -102,7 +126,24 @@ describe('UsersService', () => {
     await expect(service.replace(id, validUser)).resolves.toBe(updatedUser);
     expect(userModel.findOneAndReplace).toHaveBeenCalledWith(
       { _id: id },
-      { ...validUser, profileImage: null },
+      {
+        prefix: undefined,
+        ...validUser,
+        profileImage: null,
+        designation: undefined,
+        userType: undefined,
+        department: undefined,
+        employeeId: undefined,
+        reportingManager: undefined,
+        joiningDate: undefined,
+        employmentType: undefined,
+        workLocation: undefined,
+        tags: [],
+        notes: undefined,
+        emergencyContact: undefined,
+        alternateContactEmail: undefined,
+        skills: [],
+      },
       { returnDocument: 'after', runValidators: true },
     );
   });
@@ -117,11 +158,26 @@ describe('UsersService', () => {
       service.update(id, {
         name: { firstName: 'Updated' },
         address: { city: 'Pune' },
+        department: 'engineering',
+        tags: ['Onshore'],
+        emergencyContact: {
+          name: 'Priya Patel',
+          phone: '+919000000021',
+        },
       }),
     ).resolves.toBe(updatedUser);
     expect(userModel.findByIdAndUpdate).toHaveBeenCalledWith(
       id,
-      { $set: { 'name.firstName': 'Updated', 'address.city': 'Pune' } },
+      {
+        $set: {
+          'name.firstName': 'Updated',
+          'address.city': 'Pune',
+          department: 'engineering',
+          tags: ['Onshore'],
+          'emergencyContact.name': 'Priya Patel',
+          'emergencyContact.phone': '+919000000021',
+        },
+      },
       { new: true, runValidators: true },
     );
   });
@@ -134,11 +190,11 @@ describe('UsersService', () => {
 
     userModel.create.mockRejectedValue({
       code: 11000,
-      keyPattern: { username: 1 },
+      keyPattern: { employeeId: 1 },
     });
 
-    await expect(service.create(validUser)).rejects.toBeInstanceOf(
-      ConflictException,
+    await expect(service.create(validUser)).rejects.toThrow(
+      'A user with this employee ID already exists',
     );
   });
 });

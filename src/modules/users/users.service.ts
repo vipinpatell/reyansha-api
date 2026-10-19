@@ -16,6 +16,8 @@ export class UsersService {
   constructor(@InjectModel(User.name) private readonly userModel: Model<User>) {}
 
   async create(user: CreateUserDto) {
+    await this.ensureReportingManagerExists(user.reportingManager);
+
     try {
       return await this.userModel.create(user);
     } catch (error) {
@@ -41,9 +43,11 @@ export class UsersService {
 
   async replace(id: string, user: CreateUserDto) {
     this.validateId(id);
+    await this.ensureReportingManagerExists(user.reportingManager, id);
 
     try {
       const replacement = {
+        prefix: user.prefix,
         name: user.name,
         username: user.username,
         dob: user.dob,
@@ -52,6 +56,19 @@ export class UsersService {
         email: user.email,
         address: user.address,
         profileImage: user.profileImage ?? null,
+        designation: user.designation,
+        userType: user.userType,
+        department: user.department,
+        employeeId: user.employeeId,
+        reportingManager: user.reportingManager,
+        joiningDate: user.joiningDate,
+        employmentType: user.employmentType,
+        workLocation: user.workLocation,
+        tags: user.tags ?? [],
+        notes: user.notes,
+        emergencyContact: user.emergencyContact,
+        alternateContactEmail: user.alternateContactEmail,
+        skills: user.skills ?? [],
       };
       const updatedUser = await this.userModel
         .findOneAndReplace(
@@ -74,6 +91,7 @@ export class UsersService {
 
   async update(id: string, user: UpdateUserDto) {
     this.validateId(id);
+    await this.ensureReportingManagerExists(user.reportingManager, id);
 
     const updates = flattenUpdate(user);
     if (Object.keys(updates).length === 0) {
@@ -102,6 +120,29 @@ export class UsersService {
     }
   }
 
+  private async ensureReportingManagerExists(
+    reportingManagerId?: string,
+    userId?: string,
+  ) {
+    if (!reportingManagerId) {
+      return;
+    }
+
+    if (reportingManagerId === userId) {
+      throw new BadRequestException('A user cannot be their own reporting manager');
+    }
+
+    const managerExists = await this.userModel
+      .exists({ _id: reportingManagerId })
+      .exec();
+
+    if (!managerExists) {
+      throw new NotFoundException(
+        `Reporting manager with ID "${reportingManagerId}" was not found`,
+      );
+    }
+  }
+
   private throwIfDuplicateUserField(error: unknown): void {
     if (!isDuplicateKeyError(error)) {
       return;
@@ -112,6 +153,7 @@ export class UsersService {
       username: 'username',
       email: 'email',
       'mobile.primary': 'primary mobile number',
+      employeeId: 'employee ID',
     };
     const fieldName = fields[duplicatedField] ?? 'user field';
 
