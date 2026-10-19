@@ -9,6 +9,13 @@ import {
   WORK_LOCATIONS,
 } from '../user.constants.js';
 
+export const ACCOUNT_STATUSES = [
+  'invited',
+  'active',
+  'suspended',
+  'deactivated',
+] as const;
+
 @Schema({ _id: false })
 export class UserName {
   @Prop({ required: true, trim: true })
@@ -88,6 +95,21 @@ export class User {
 
   @Prop({ required: true, unique: true, lowercase: true, trim: true })
   email!: string;
+
+  @Prop({ type: String, select: false })
+  passwordHash?: string;
+
+  @Prop({ type: String, enum: ACCOUNT_STATUSES, default: 'invited' })
+  accountStatus!: (typeof ACCOUNT_STATUSES)[number];
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Role' }], default: [] })
+  roles!: Types.ObjectId[];
+
+  @Prop({ type: Boolean, default: false })
+  mustChangePassword!: boolean;
+
+  @Prop({ type: Date })
+  lastLoginAt?: Date;
 
   @Prop({ type: UserAddressSchema, required: true })
   address!: UserAddress;

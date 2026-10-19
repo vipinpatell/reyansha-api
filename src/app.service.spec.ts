@@ -39,6 +39,16 @@ describe('AppService', () => {
     expect(page).toContain('<dd>127.0.0.1</dd>');
     expect(page).toContain('<dd>27017</dd>');
     expect(page).toContain('<dd>reyansha_db</dd>');
+    expect(page).toContain('Authentication API');
+    expect(page).toContain('Roles API');
+    expect(page).toContain('OpenAPI JSON:');
+    expect(service.getApiInfo().apis).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ api: 'Authentication' }),
+        expect.objectContaining({ api: 'Users' }),
+        expect.objectContaining({ api: 'Roles' }),
+      ]),
+    );
   });
 
   it('shows disconnected when MongoDB is not connected', async () => {

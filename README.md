@@ -117,3 +117,104 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
 # reyansha-api
+
+## Authentication and access control
+
+The API uses database-backed, opaque sessions in an `HttpOnly` cookie named
+`reyansha_session`. Only a SHA-256 hash of each session or password-reset token
+is stored in MongoDB. Passwords are hashed with bcryptjs at cost 12. Cookies
+use `SameSite=Lax`, `Secure` in production, and are scoped to `/api/v1`.
+
+### First administrator
+
+Authentication is not enabled for profile-only records until they are
+activated. Ensure an existing profile is present for the initial administrator,
+then configure `AUTH_BOOTSTRAP_TOKEN` to a unique random value of at least 32
+characters. Call the one-time endpoint:
+
+```http
+POST /api/v1/auth/bootstrap
+X-Bootstrap-Token: <AUTH_BOOTSTRAP_TOKEN>
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "<strong password, at least 12 characters>"
+}
+```
+
+The email must match an unactivated profile. The endpoint assigns only the
+Super Admin role, and a persistent one-time claim prevents later bootstrap
+attempts. Keep the bootstrap token out of source control and remove it from the
+runtime environment after setup. For an empty database, create the initial
+profile through a trusted database provisioning process before bootstrapping;
+there is no public signup or public role assignment.
+
+### Session and account endpoints
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/auth/login` | Sign in with `{ "identifier": "email-or-username", "password": "..." }` |
+| `POST` | `/api/v1/auth/logout` | Revoke the current session |
+| `GET` | `/api/v1/auth/me` | Return the current profile, roles, and permissions |
+| `POST` | `/api/v1/auth/refresh` | Rotate the session cookie and renew its seven-day expiry |
+| `POST` | `/api/v1/auth/change-password` | Change a signed-in user's password and revoke all sessions |
+| `POST` | `/api/v1/auth/forgot-password` | Send a one-hour reset link when an active account exists |
+| `POST` | `/api/v1/auth/reset-password` | Consume a one-time reset or invitation token |
+| `POST` | `/api/v1/auth/invite` | Send an activation link for an invited profile; requires `users.create` |
+| `POST` | `/api/v1/auth/bootstrap` | One-time initial Super Admin activation |
+
+New users created through `POST /api/v1/users` start as invited and receive the
+non-privileged Employee role. Send their activation link with
+`POST /api/v1/auth/invite`; they set their own password through the reset
+endpoint. Existing records without password hashes cannot sign in.
+
+Configure SMTP and the dashboard's reset route before using invitation or
+password recovery:
+
+```dotenv
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM=
+PASSWORD_RESET_URL=http://localhost:3001/reset-password
+```
+
+Set `CORS_ORIGINS` to a comma-separated list of exact dashboard origins. The
+API enables credentialed CORS for these origins and checks request origins on
+state-changing requests. Browser requests must include credentials, for
+example `fetch(url, { credentials: 'include' })`. Production deployments must
+use HTTPS and set `NODE_ENV=production`.
+
+### Roles and permissions
+
+Roles are seeded once at startup and are separate from the profile's `userType`.
+The defaults are explicit:
+
+| Role | Default permissions |
+| --- | --- |
+| Super Admin | All listed permissions |
+| HR | Read, create, update, and deactivate users; update own profile; read roles |
+| Tech Lead | Read direct reports; update own profile |
+| Employee | Update own profile |
+| Admin | Read, create, update, and deactivate users; update own profile |
+| Accountant | Update own profile |
+| Recruiter | Read direct reports; update own profile |
+| Sales | Update own profile |
+| Manager | Read direct reports; update own profile |
+| QA Lead | Read direct reports; update own profile |
+| Third Party | No permissions by default |
+| Marketing | Update own profile |
+| Support | Read direct reports; update own profile |
+
+`GET /api/v1/users` returns all profiles to `users.read` roles and direct reports
+only to `users.read_limited` roles. Only Super Admins can manage Super Admin
+profiles. Role management is guarded by `roles.manage`; role assignment uses
+`PATCH /api/v1/users/:id/roles`. Profile deactivation uses
+`PATCH /api/v1/users/:id/deactivate`. The API enforces permissions server-side;
+dashboard navigation visibility is not an authorization control.
+
+Role, user, and authenticated profile responses never include the password hash.
+There is no frontend login implementation in this NestJS repository.

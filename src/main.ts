@@ -1,35 +1,45 @@
-
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 import { AppModule, ObserveInstrument } from './app.module.js';
+import { getAllowedOrigins } from './modules/auth/origins.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     instrument: ObserveInstrument,
   });
 
-   // Allow requests from the Next.js dashboard.
+  const allowedOrigins = getAllowedOrigins(process.env.CORS_ORIGINS);
+
   app.enableCors({
-    origin: ['http://localhost:3001'],
+    origin: allowedOrigins,
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Bootstrap-Token'],
   });
-  
+
   app.setGlobalPrefix('api/v1', {
     exclude: ['/'],
   });
 
   const config = new DocumentBuilder()
     .setTitle('Reyansha API')
-    .setDescription('REST API documentation for Reyansha Ecosystem')
+    .setDescription(
+      'Reyansha API v1: authentication, session management, user profiles, role-based access control, and health endpoints.',
+    )
     .setVersion('1.0')
-    .addBearerAuth()
+    .addCookieAuth('reyansha_session', {
+      type: 'apiKey',
+      in: 'cookie',
+      description: 'HttpOnly session cookie returned by /auth/login',
+    })
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
 
-  SwaggerModule.setup('docs', app, document);
+  SwaggerModule.setup('docs', app, document, {
+    customSiteTitle: 'Reyansha API v1 - Swagger',
+  });
 
   const port = process.env.PORT ?? 3000;
 

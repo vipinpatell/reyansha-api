@@ -1,4 +1,3 @@
-
 import { Injectable } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import type { Connection } from 'mongoose';
@@ -10,11 +9,49 @@ export class AppService {
   getApiInfo() {
     return {
       service: 'Reyansha API',
+      version: '1.0',
       documentation: `${this.baseUrl}/docs`,
       apis: [
         {
-          api: '/api/v1/users',
+          api: 'Authentication',
+          url: `${this.baseUrl}/api/v1/auth`,
+          endpoints: [
+            'POST /api/v1/auth/login',
+            'POST /api/v1/auth/logout',
+            'GET /api/v1/auth/me',
+            'POST /api/v1/auth/refresh',
+            'POST /api/v1/auth/change-password',
+            'POST /api/v1/auth/forgot-password',
+            'POST /api/v1/auth/reset-password',
+            'POST /api/v1/auth/bootstrap',
+          ],
+        },
+        {
+          api: 'Users',
           url: `${this.baseUrl}/api/v1/users`,
+          endpoints: [
+            'GET /api/v1/users',
+            'POST /api/v1/users',
+            'GET /api/v1/users/:id',
+            'PUT /api/v1/users/:id',
+            'PATCH /api/v1/users/:id',
+            'PATCH /api/v1/users/:id/roles',
+            'PATCH /api/v1/users/:id/deactivate',
+          ],
+        },
+        {
+          api: 'Roles',
+          url: `${this.baseUrl}/api/v1/roles`,
+          endpoints: [
+            'GET /api/v1/roles',
+            'POST /api/v1/roles',
+            'PATCH /api/v1/roles/:key',
+            'DELETE /api/v1/roles/:key',
+          ],
+        },
+        {
+          api: 'Health',
+          url: `${this.baseUrl}/api/v1/health`,
         },
       ],
     };
@@ -70,9 +107,18 @@ export class AppService {
       <h2>Links</h2>
       <ul>
         <li><a href="/docs">${escapeHtml(`${this.baseUrl}/docs`)}</a> — API documentation</li>
+        <li><a href="/api/v1/info">${escapeHtml(`${this.baseUrl}/api/v1/info`)}</a> — API endpoint index</li>
+        <li><a href="/api/v1/auth/login">Authentication API</a> — login, session, and password flows</li>
         <li><a href="/api/v1/users">Users API</a></li>
+        <li><a href="/api/v1/roles">Roles API</a></li>
         <li><a href="/api/v1/health">Health API</a></li>
       </ul>
+    </section>
+    <section>
+      <h2>Authentication and access control</h2>
+      <p>API v1 includes cookie-based authentication and role-based permissions.
+      Open the API documentation for request details and protected endpoint requirements.</p>
+      <p class="muted">OpenAPI JSON: <a href="/docs-json">/docs-json</a></p>
     </section>
   </body>
 </html>`;
@@ -95,7 +141,9 @@ export class AppService {
       connected,
       label: labels[connectionState] ?? 'Unknown',
       host: this.connection.host || 'Not connected',
-      port: this.connection.port ? String(this.connection.port) : 'Not connected',
+      port: this.connection.port
+        ? String(this.connection.port)
+        : 'Not connected',
       database: this.connection.name || 'Not connected',
     };
   }

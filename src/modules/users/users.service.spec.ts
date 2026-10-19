@@ -1,11 +1,9 @@
 import { getModelToken } from '@nestjs/mongoose';
-import {
-  BadRequestException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { User } from './schemas/user.schema.js';
 import { UsersService } from './users.service.js';
+import { RolesService } from '../roles/roles.service.js';
 
 const validUser = {
   name: { firstName: 'Default', lastName: 'User' },
@@ -34,6 +32,18 @@ describe('UsersService', () => {
     findOneAndReplace: ReturnType<typeof vi.fn>;
     findByIdAndUpdate: ReturnType<typeof vi.fn>;
   };
+  const reader = {
+    id: 'user-id',
+    email: 'user@example.com',
+    permissions: ['users.read'],
+    roles: [],
+    mustChangePassword: false,
+  };
+  const updater = {
+    ...reader,
+    id: 'admin-id',
+    permissions: ['users.update'],
+  };
 
   beforeEach(async () => {
     userModel = {
@@ -49,6 +59,13 @@ describe('UsersService', () => {
       providers: [
         UsersService,
         { provide: getModelToken(User.name), useValue: userModel },
+        {
+          provide: RolesService,
+          useValue: {
+            findByIds: vi.fn(),
+            findByKey: vi.fn().mockResolvedValue({ _id: 'employee-role' }),
+          },
+        },
       ],
     }).compile();
 
@@ -69,7 +86,7 @@ describe('UsersService', () => {
     const sort = vi.fn().mockReturnValue({ exec });
     userModel.find.mockReturnValue({ sort });
 
-    await expect(service.findAll()).resolves.toBe(users);
+    await expect(service.findAll(reader)).resolves.toBe(users);
     expect(sort).toHaveBeenCalledWith({ createdAt: -1 });
   });
 
@@ -78,11 +95,16 @@ describe('UsersService', () => {
     const exec = vi.fn().mockResolvedValue(user);
     userModel.findById.mockReturnValue({ exec });
 
-    await expect(service.findOne(user._id)).resolves.toBe(user);
+    await expect(service.findOne(user._id, reader)).resolves.toBe(user);
   });
 
   it('validates reporting manager references and prevents self-reporting', async () => {
     const managerId = '507f1f77bcf86cd799439012';
+    userModel.findById.mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        exec: vi.fn().mockResolvedValue({ roles: [] }),
+      }),
+    });
     userModel.exists.mockReturnValue({
       exec: vi.fn().mockResolvedValue({ _id: managerId }),
     });
@@ -93,7 +115,7 @@ describe('UsersService', () => {
     ).resolves.toEqual({ _id: 'user-id' });
 
     await expect(
-      service.update(managerId, { reportingManager: managerId }),
+      service.update(managerId, { reportingManager: managerId }, updater),
     ).rejects.toThrow('A user cannot be their own reporting manager');
 
     userModel.exists.mockReturnValue({
@@ -114,38 +136,58 @@ describe('UsersService', () => {
     });
 
     await expect(
-      service.findOne('507f1f77bcf86cd799439011'),
+      service.findOne('507f1f77bcf86cd799439011', reader),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('replaces an existing user and clears omitted optional image fields', async () => {
     const id = '507f1f77bcf86cd799439011';
     const updatedUser = { _id: id };
+    userModel.findById.mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        exec: vi.fn().mockResolvedValue({ roles: [] }),
+      }),
+    });
     const exec = vi.fn().mockResolvedValue(updatedUser);
-    userModel.findOneAndReplace.mockReturnValue({ exec });
-    await expect(service.replace(id, validUser)).resolves.toBe(updatedUser);
-    expect(userModel.findOneAndReplace).toHaveBeenCalledWith(
-      { _id: id },
+    userModel.findByIdAndUpdate.mockReturnValue({ exec });
+    await expect(
+      service.replace(id, validUser, {
+        id: 'admin-id',
+        email: 'admin@example.com',
+        permissions: ['users.update'],
+        roles: [{ key: 'super_admin', name: 'Super Admin' }],
+        mustChangePassword: false,
+      }),
+    ).resolves.toBe(updatedUser);
+    expect(userModel.findByIdAndUpdate).toHaveBeenCalledWith(
+      id,
       {
-        prefix: undefined,
-        ...validUser,
-        profileImage: null,
-        designation: undefined,
-        userType: undefined,
-        department: undefined,
-        employeeId: undefined,
-        reportingManager: undefined,
-        joiningDate: undefined,
-        employmentType: undefined,
-        workLocation: undefined,
-        tags: [],
-        notes: undefined,
-        emergencyContact: undefined,
-        alternateContactEmail: undefined,
-        skills: [],
+        $set: expect.objectContaining({
+          ...validUser,
+          profileImage: null,
+          tags: [],
+          skills: [],
+        }),
+        $unset: {
+          prefix: 1,
+          designation: 1,
+          userType: 1,
+          department: 1,
+          employeeId: 1,
+          reportingManager: 1,
+          joiningDate: 1,
+          employmentType: 1,
+          workLocation: 1,
+          notes: 1,
+          emergencyContact: 1,
+          alternateContactEmail: 1,
+        },
       },
-      { returnDocument: 'after', runValidators: true },
+      { new: true, runValidators: true },
     );
+    const replacementUpdate = userModel.findByIdAndUpdate.mock.calls[0][1];
+    expect(replacementUpdate.$set).not.toHaveProperty('passwordHash');
+    expect(replacementUpdate.$set).not.toHaveProperty('roles');
   });
 
   it('patches nested properties without replacing their sibling fields', async () => {
@@ -153,18 +195,27 @@ describe('UsersService', () => {
     const updatedUser = { _id: id };
     const exec = vi.fn().mockResolvedValue(updatedUser);
     userModel.findByIdAndUpdate.mockReturnValue({ exec });
+    userModel.findById.mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        exec: vi.fn().mockResolvedValue({ roles: [] }),
+      }),
+    });
 
     await expect(
-      service.update(id, {
-        name: { firstName: 'Updated' },
-        address: { city: 'Pune' },
-        department: 'engineering',
-        tags: ['Onshore'],
-        emergencyContact: {
-          name: 'Priya Patel',
-          phone: '+919000000021',
+      service.update(
+        id,
+        {
+          name: { firstName: 'Updated' },
+          address: { city: 'Pune' },
+          department: 'engineering',
+          tags: ['Onshore'],
+          emergencyContact: {
+            name: 'Priya Patel',
+            phone: '+919000000021',
+          },
         },
-      }),
+        updater,
+      ),
     ).resolves.toBe(updatedUser);
     expect(userModel.findByIdAndUpdate).toHaveBeenCalledWith(
       id,
@@ -184,7 +235,12 @@ describe('UsersService', () => {
 
   it('rejects empty patches and translates duplicate-key errors', async () => {
     const id = '507f1f77bcf86cd799439011';
-    await expect(service.update(id, {})).rejects.toBeInstanceOf(
+    userModel.findById.mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        exec: vi.fn().mockResolvedValue({ roles: [] }),
+      }),
+    });
+    await expect(service.update(id, {}, updater)).rejects.toBeInstanceOf(
       BadRequestException,
     );
 

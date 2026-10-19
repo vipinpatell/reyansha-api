@@ -13,7 +13,10 @@ describe('AppController', () => {
           provide: AppService,
           useValue: {
             getHomePage: () => '<html>Reyansha API</html>',
-            getApiInfo: () => ({ service: 'Reyansha API' }),
+            getApiInfo: () => ({
+              service: 'Reyansha API',
+              apis: [{ api: 'Authentication' }, { api: 'Roles' }],
+            }),
           },
         },
       ],
@@ -27,9 +30,10 @@ describe('AppController', () => {
       expect(appController.getRoot()).toBe('<html>Reyansha API</html>');
     });
 
-    it('returns API information at the API root', () => {
-      expect(appController.getApiV1Root()).toEqual({
+    it('returns API information at the API info endpoint', () => {
+      expect(appController.getApiInfo()).toEqual({
         service: 'Reyansha API',
+        apis: [{ api: 'Authentication' }, { api: 'Roles' }],
       });
     });
   });
