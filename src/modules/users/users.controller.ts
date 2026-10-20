@@ -15,6 +15,7 @@ import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -23,11 +24,13 @@ import {
   ApiCookieAuth,
 } from '@nestjs/swagger';
 import type { AuthenticatedRequest } from '../auth/auth.types.js';
+import { AuthService } from '../auth/auth.service.js';
 import { RequirePermissions } from '../permissions/permissions.decorator.js';
 import { PermissionsGuard } from '../permissions/permissions.guard.js';
 import { AssignRolesDto } from './dto/assign-roles.dto.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
+import { SetUserPasswordDto } from './dto/set-user-password.dto.js';
 import { UsersService } from './users.service.js';
 
 @Controller('users')
@@ -42,7 +45,10 @@ import { UsersService } from './users.service.js';
   }),
 )
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly authService: AuthService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List all users' })
@@ -103,6 +109,36 @@ export class UsersController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.usersService.assignRoles(id, input.roleIds, request.user!);
+  }
+
+  @Patch(':id/password')
+  @ApiOperation({
+    summary:
+      'Set a user password as Super Admin and require a change at next login',
+  })
+  @ApiParam({ name: 'id', description: 'MongoDB user ID' })
+  @ApiOkResponse({
+    description:
+      'Password updated, the target is required to change it at next login, and existing sessions are revoked',
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid user ID or password does not meet the requirements',
+  })
+  @ApiForbiddenResponse({
+    description: 'The caller is not a Super Admin',
+  })
+  @ApiNotFoundResponse({ description: 'User not found' })
+  @RequirePermissions('roles.manage')
+  setPassword(
+    @Param('id') id: string,
+    @Body() input: SetUserPasswordDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.authService.setUserPasswordBySuperAdmin(
+      request.user!,
+      id,
+      input.password,
+    );
   }
 
   @Patch(':id/deactivate')

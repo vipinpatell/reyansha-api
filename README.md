@@ -216,5 +216,31 @@ profiles. Role management is guarded by `roles.manage`; role assignment uses
 `PATCH /api/v1/users/:id/deactivate`. The API enforces permissions server-side;
 dashboard navigation visibility is not an authorization control.
 
+### Super Admin password reset
+
+`PATCH /api/v1/users/:id/password` lets a signed-in Super Admin set a user's
+temporary password. Swagger can execute this operation using the authenticated
+Super Admin session cookie:
+
+```json
+{ "password": "a-strong-temporary-password" }
+```
+
+Passwords must contain at least 12 characters, be no more than 72 characters,
+and fit within 72 UTF-8 bytes (bcrypt's input limit). This endpoint requires
+both the `roles.manage` permission and the `super_admin` role. It hashes the
+password using the same bcrypt cost-12 configuration as the other password
+flows, sets `mustChangePassword`, revokes the target user's active sessions,
+and invalidates their outstanding invitation/reset links. The response reports
+`mustChangePassword: true` and the number of revoked sessions. Once the user
+signs in with the temporary password, the API blocks other protected endpoints
+until they change it through `POST /api/v1/auth/change-password`.
+
+Success returns `200` with `message`, `mustChangePassword`, and
+`revokedSessions`. Invalid IDs/passwords return `400`, a caller without the
+Super Admin role returns `403`, and a missing user returns `404`. The route
+requires `roles.manage` and the service verifies the caller also has the
+`super_admin` role. The existing password is never returned or needed.
+
 Role, user, and authenticated profile responses never include the password hash.
 There is no frontend login implementation in this NestJS repository.

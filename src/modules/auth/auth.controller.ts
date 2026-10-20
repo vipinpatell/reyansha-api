@@ -24,6 +24,7 @@ import { InviteUserDto } from './dto/invite-user.dto.js';
 import { RequirePermissions } from '../permissions/permissions.decorator.js';
 import { PermissionsGuard } from '../permissions/permissions.guard.js';
 import { readCookie } from './cookie.js';
+import { AllowMustChangePassword } from './password-change.decorator.js';
 
 @Controller('auth')
 @ApiTags('Authentication')
@@ -79,6 +80,7 @@ export class AuthController {
 
   @Post('change-password')
   @HttpCode(200)
+  @AllowMustChangePassword()
   @ApiCookieAuth('reyansha_session')
   changePassword(
     @Req() request: AuthenticatedRequest,

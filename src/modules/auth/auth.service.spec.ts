@@ -1,7 +1,8 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
+import { compare } from 'bcryptjs';
 import { AuthService } from './auth.service.js';
 import {
   AuthBootstrapClaim,
@@ -16,6 +17,7 @@ describe('AuthService', () => {
   let userModel: {
     findOne: ReturnType<typeof vi.fn>;
     findById: ReturnType<typeof vi.fn>;
+    findByIdAndUpdate: ReturnType<typeof vi.fn>;
   };
   let roleModel: { find: ReturnType<typeof vi.fn> };
   let sessionModel: {
@@ -23,11 +25,13 @@ describe('AuthService', () => {
     deleteMany: ReturnType<typeof vi.fn>;
     findOne: ReturnType<typeof vi.fn>;
   };
+  let resetModel: { deleteMany: ReturnType<typeof vi.fn> };
 
   beforeEach(async () => {
     userModel = {
       findOne: vi.fn(),
       findById: vi.fn(),
+      findByIdAndUpdate: vi.fn(),
     };
     roleModel = { find: vi.fn() };
     sessionModel = {
@@ -35,6 +39,7 @@ describe('AuthService', () => {
       deleteMany: vi.fn(),
       findOne: vi.fn(),
     };
+    resetModel = { deleteMany: vi.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -42,7 +47,7 @@ describe('AuthService', () => {
         { provide: getModelToken(User.name), useValue: userModel },
         { provide: getModelToken(Role.name), useValue: roleModel },
         { provide: getModelToken(AuthSession.name), useValue: sessionModel },
-        { provide: getModelToken(PasswordReset.name), useValue: {} },
+        { provide: getModelToken(PasswordReset.name), useValue: resetModel },
         { provide: getModelToken(AuthBootstrapClaim.name), useValue: {} },
         {
           provide: ConfigService,
@@ -114,5 +119,67 @@ describe('AuthService', () => {
       UnauthorizedException,
     );
     expect(sessionModel.deleteMany).toHaveBeenCalledWith({ userId: 'user-id' });
+  });
+
+  it('only lets a Super Admin reset another user password', async () => {
+    await expect(
+      service.setUserPasswordBySuperAdmin(
+        {
+          id: 'actor-id',
+          email: 'manager@example.com',
+          permissions: ['roles.manage'],
+          roles: [{ key: 'admin', name: 'Admin' }],
+          mustChangePassword: false,
+        },
+        '507f1f77bcf86cd799439011',
+        'a-strong-password',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(userModel.findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('hashes the password, requires a change at next login, and revokes sessions', async () => {
+    const targetId = '507f1f77bcf86cd799439011';
+    const password = 'a-new-strong-password';
+    const update = {
+      _id: targetId,
+    };
+    const sessionsDeleted = { deletedCount: 2 };
+    userModel.findByIdAndUpdate.mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        exec: vi.fn().mockResolvedValue(update),
+      }),
+    });
+    sessionModel.deleteMany.mockReturnValue({
+      exec: vi.fn().mockResolvedValue(sessionsDeleted),
+    });
+    resetModel.deleteMany.mockReturnValue({
+      exec: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+    });
+
+    const result = await service.setUserPasswordBySuperAdmin(
+      {
+        id: 'admin-id',
+        email: 'admin@example.com',
+        permissions: ['roles.manage'],
+        roles: [{ key: 'super_admin', name: 'Super Admin' }],
+        mustChangePassword: false,
+      },
+      targetId,
+      password,
+    );
+
+    const updateDocument = userModel.findByIdAndUpdate.mock.calls[0][1];
+    await expect(
+      compare(password, updateDocument.$set.passwordHash),
+    ).resolves.toBe(true);
+    expect(updateDocument.$set.mustChangePassword).toBe(true);
+    expect(sessionModel.deleteMany).toHaveBeenCalledWith({ userId: targetId });
+    expect(resetModel.deleteMany).toHaveBeenCalledWith({ userId: targetId });
+    expect(result).toEqual({
+      message: 'Password updated; the user must change it after signing in',
+      mustChangePassword: true,
+      revokedSessions: 2,
+    });
   });
 });

@@ -78,6 +78,7 @@ describe('AppController (e2e)', () => {
         expect(body.paths).toHaveProperty('/api/v1/auth/login');
         expect(body.paths).toHaveProperty('/api/v1/roles');
         expect(body.paths).toHaveProperty('/api/v1/users/{id}/roles');
+        expect(body.paths).toHaveProperty('/api/v1/users/{id}/password');
       });
   });
 

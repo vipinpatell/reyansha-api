@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -11,6 +12,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { compare, hash } from 'bcryptjs';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createTransport } from 'nodemailer';
+import { Types } from 'mongoose';
 import type { Model } from 'mongoose';
 import type { Response } from 'express';
 import { User } from '../users/schemas/user.schema.js';
@@ -313,6 +315,51 @@ export class AuthService {
       this.sessionModel.deleteMany({ userId: reset.userId }).exec(),
     ]);
     return { message: 'Password reset successfully; please sign in' };
+  }
+
+  async setUserPasswordBySuperAdmin(
+    actor: AuthenticatedUser,
+    targetUserId: string,
+    password: string,
+  ) {
+    if (!actor.roles.some((role) => role.key === 'super_admin')) {
+      throw new ForbiddenException(
+        'Only a Super Admin can set another user password',
+      );
+    }
+    if (!Types.ObjectId.isValid(targetUserId)) {
+      throw new BadRequestException(`"${targetUserId}" is not a valid user ID`);
+    }
+    validatePasswordBytes(password);
+
+    const user = await this.userModel
+      .findByIdAndUpdate(
+        targetUserId,
+        {
+          $set: {
+            passwordHash: await hash(password, BCRYPT_ROUNDS),
+            mustChangePassword: true,
+          },
+        },
+        { new: true },
+      )
+      .select('_id')
+      .exec();
+    if (!user) {
+      throw new NotFoundException(
+        `User with ID "${targetUserId}" was not found`,
+      );
+    }
+
+    const [sessions] = await Promise.all([
+      this.sessionModel.deleteMany({ userId: user._id }).exec(),
+      this.resetModel.deleteMany({ userId: user._id }).exec(),
+    ]);
+    return {
+      message: 'Password updated; the user must change it after signing in',
+      mustChangePassword: true,
+      revokedSessions: sessions.deletedCount ?? 0,
+    };
   }
 
   async bootstrap(input: BootstrapDto, token: string | undefined) {
