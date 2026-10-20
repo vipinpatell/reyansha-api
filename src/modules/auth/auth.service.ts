@@ -189,9 +189,22 @@ export class AuthService {
   }
 
   async forgotPassword(email: string) {
-    const smtp = this.smtpConfiguration();
-    const resetUrl = this.config.get<string>('PASSWORD_RESET_URL');
-    if (!resetUrl) {
+    const consoleOtpEnabled =
+      this.config.get<string>('PASSWORD_RESET_CONSOLE_OTP') === 'true';
+    if (
+      consoleOtpEnabled &&
+      this.config.get<string>('NODE_ENV') !== 'development'
+    ) {
+      throw new ServiceUnavailableException(
+        'Console password reset delivery is only available in development',
+      );
+    }
+
+    const smtp = consoleOtpEnabled ? undefined : this.smtpConfiguration();
+    const resetUrl = consoleOtpEnabled
+      ? undefined
+      : this.config.get<string>('PASSWORD_RESET_URL');
+    if (!consoleOtpEnabled && !resetUrl) {
       throw new ServiceUnavailableException(
         'Password reset delivery is not configured',
       );
@@ -209,19 +222,23 @@ export class AuthService {
         expiresAt: new Date(Date.now() + RESET_TTL_MS),
         purpose: 'reset',
       });
-      const link = new URL(resetUrl);
-      link.searchParams.set('token', token);
-      const transport = createTransport(smtp);
-      try {
-        await transport.sendMail({
-          from: this.config.getOrThrow<string>('SMTP_FROM'),
-          to: user.email,
-          subject: 'Reset your Reyansha account password',
-          text: `Use this link within one hour to reset your password: ${link.toString()}`,
-        });
-      } catch (error) {
-        await this.resetModel.deleteOne({ tokenHash: hashToken(token) }).exec();
-        throw error;
+      if (consoleOtpEnabled) {
+        console.info(`Password reset OTP for ${user.email}: ${token}`);
+      } else {
+        const link = new URL(resetUrl!);
+        link.searchParams.set('token', token);
+        const transport = createTransport(smtp!);
+        try {
+          await transport.sendMail({
+            from: this.config.getOrThrow<string>('SMTP_FROM'),
+            to: user.email,
+            subject: 'Reset your Reyansha account password',
+            text: `Use this link within one hour to reset your password: ${link.toString()}`,
+          });
+        } catch (error) {
+          await this.resetModel.deleteOne({ tokenHash: hashToken(token) }).exec();
+          throw error;
+        }
       }
     }
     return {

@@ -179,8 +179,16 @@ SMTP_SECURE=false
 SMTP_USER=
 SMTP_PASSWORD=
 SMTP_FROM=
+PASSWORD_RESET_CONSOLE_OTP=false
 PASSWORD_RESET_URL=http://localhost:3001/reset-password
 ```
+
+For local development, set `PASSWORD_RESET_CONSOLE_OTP=true` to print the
+one-time reset token in the API console instead of sending email. The token is
+valid for one hour and can be submitted to `POST /api/v1/auth/reset-password`
+as `token`, alongside `newPassword`. Console delivery is rejected in
+non-development environments. Set the option to `false` to send reset links
+through SMTP.
 
 Set `CORS_ORIGINS` to a comma-separated list of exact dashboard origins. The
 API enables credentialed CORS for these origins and checks request origins on

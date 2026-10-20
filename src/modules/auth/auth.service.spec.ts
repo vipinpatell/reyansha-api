@@ -1,8 +1,13 @@
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import { compare } from 'bcryptjs';
+import { createTransport } from 'nodemailer';
 import { AuthService } from './auth.service.js';
 import {
   AuthBootstrapClaim,
@@ -11,6 +16,10 @@ import {
 } from './auth.schema.js';
 import { Role } from '../roles/role.schema.js';
 import { User } from '../users/schemas/user.schema.js';
+
+vi.mock('nodemailer', () => ({
+  createTransport: vi.fn(),
+}));
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -25,7 +34,12 @@ describe('AuthService', () => {
     deleteMany: ReturnType<typeof vi.fn>;
     findOne: ReturnType<typeof vi.fn>;
   };
-  let resetModel: { deleteMany: ReturnType<typeof vi.fn> };
+  let resetModel: {
+    create: ReturnType<typeof vi.fn>;
+    deleteMany: ReturnType<typeof vi.fn>;
+    deleteOne: ReturnType<typeof vi.fn>;
+  };
+  let configValues: Record<string, string | undefined>;
 
   beforeEach(async () => {
     userModel = {
@@ -39,7 +53,13 @@ describe('AuthService', () => {
       deleteMany: vi.fn(),
       findOne: vi.fn(),
     };
-    resetModel = { deleteMany: vi.fn() };
+    resetModel = {
+      create: vi.fn(),
+      deleteMany: vi.fn(),
+      deleteOne: vi.fn(),
+    };
+    configValues = { NODE_ENV: 'development' };
+    vi.mocked(createTransport).mockReset();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -51,12 +71,105 @@ describe('AuthService', () => {
         { provide: getModelToken(AuthBootstrapClaim.name), useValue: {} },
         {
           provide: ConfigService,
-          useValue: { get: vi.fn().mockReturnValue('development') },
+          useValue: {
+            get: vi.fn((key: string) => configValues[key]),
+            getOrThrow: vi.fn((key: string) => {
+              const value = configValues[key];
+              if (!value) throw new Error(`Missing config: ${key}`);
+              return value;
+            }),
+          },
         },
       ],
     }).compile();
 
     service = module.get(AuthService);
+  });
+
+  it('logs a one-time reset token when console OTP mode is enabled', async () => {
+    configValues.PASSWORD_RESET_CONSOLE_OTP = 'true';
+    userModel.findOne.mockReturnValue({
+      exec: vi.fn().mockResolvedValue({
+        _id: 'user-id',
+        email: 'user@example.com',
+      }),
+    });
+    resetModel.deleteMany.mockReturnValue({
+      exec: vi.fn().mockResolvedValue({ deletedCount: 0 }),
+    });
+    resetModel.create.mockResolvedValue({});
+    const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    await expect(service.forgotPassword('user@example.com')).resolves.toEqual({
+      message:
+        'If an active account matches that email, password reset instructions will be sent.',
+    });
+
+    expect(consoleInfo).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Password reset OTP for user@example\.com: [A-Za-z0-9_-]{43}$/,
+      ),
+    );
+    expect(resetModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-id', purpose: 'reset' }),
+    );
+    expect(createTransport).not.toHaveBeenCalled();
+    consoleInfo.mockRestore();
+  });
+
+  it('sends reset email when console OTP mode is disabled', async () => {
+    configValues = {
+      NODE_ENV: 'development',
+      PASSWORD_RESET_CONSOLE_OTP: 'false',
+      PASSWORD_RESET_URL: 'http://localhost:3001/reset-password',
+      SMTP_HOST: 'smtp.example.com',
+      SMTP_PORT: '587',
+      SMTP_SECURE: 'false',
+      SMTP_USER: 'mailer@example.com',
+      SMTP_PASSWORD: 'smtp-password',
+      SMTP_FROM: 'mailer@example.com',
+    };
+    userModel.findOne.mockReturnValue({
+      exec: vi.fn().mockResolvedValue({
+        _id: 'user-id',
+        email: 'user@example.com',
+      }),
+    });
+    resetModel.deleteMany.mockReturnValue({
+      exec: vi.fn().mockResolvedValue({ deletedCount: 0 }),
+    });
+    resetModel.create.mockResolvedValue({});
+    const sendMail = vi.fn().mockResolvedValue({});
+    vi.mocked(createTransport).mockReturnValue({ sendMail } as never);
+
+    await service.forgotPassword('user@example.com');
+
+    expect(createTransport).toHaveBeenCalledWith({
+      host: 'smtp.example.com',
+      port: 587,
+      secure: false,
+      requireTLS: true,
+      auth: { user: 'mailer@example.com', pass: 'smtp-password' },
+    });
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: 'mailer@example.com',
+        to: 'user@example.com',
+        subject: 'Reset your Reyansha account password',
+      }),
+    );
+  });
+
+  it('prevents console OTP mode outside development', async () => {
+    configValues = {
+      NODE_ENV: 'staging',
+      PASSWORD_RESET_CONSOLE_OTP: 'true',
+    };
+
+    await expect(
+      service.forgotPassword('user@example.com'),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(userModel.findOne).not.toHaveBeenCalled();
   });
 
   it('rejects inactive accounts without issuing a cookie or session', async () => {
